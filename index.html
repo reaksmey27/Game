@@ -211,7 +211,7 @@
             <div class="max-w-md text-slate-300 text-xs md:text-sm space-y-4 text-left bg-purple-950/20 border border-purple-500/20 p-6 rounded-lg mb-8 max-h-[50vh] overflow-y-auto">
                 <div>
                     <span class="font-bold text-pink-400 tracking-wider">FLIGHT ENGINE CONTROLS</span>
-                    <p class="text-slate-400 mt-1">Slide your cursor or glide your touch along the screen to sweep your ship back and forth. Catch neon tokens to load payload systems.</p>
+                    <p class="text-slate-400 mt-1">Slide your cursor, glide your touch, or use A/D or the arrow keys to sweep your ship back and forth. Catch neon tokens to load payload systems.</p>
                 </div>
                 <hr class="border-purple-500/20">
                 <div>
@@ -291,7 +291,7 @@
         <!-- 7. Pause Overlay -->
         <div id="pause-overlay" class="hidden absolute inset-0 bg-black/80 flex flex-col justify-center items-center z-15">
             <h2 class="text-4xl font-black text-cyan-400 tracking-widest retro-glow-cyan font-['Press_Start_2P'] animate-pulse">PAUSED</h2>
-            <p class="text-slate-400 mt-3 font-mono text-xs">Press ESC Key to resume system</p>
+            <p class="text-slate-400 mt-3 font-mono text-xs">Press ESC to resume. Press SPACE to fire when lasers are active.</p>
         </div>
     </div>
 
@@ -653,6 +653,7 @@
     <script>
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
+        const gameContainer = document.getElementById('game-container');
         const scoreDisplay = document.getElementById('score-display');
         const levelDisplay = document.getElementById('level-display');
         const livesContainer = document.getElementById('lives-container');
@@ -663,6 +664,10 @@
         const pauseOverlay = document.getElementById('pause-overlay');
         const muteBtn = document.getElementById('mute-btn');
         const muteIcon = document.getElementById('mute-icon');
+        const highscoresList = document.getElementById('highscores-list');
+        const toggleMusic = document.getElementById('toggle-music');
+        const toggleScanlinesInput = document.getElementById('toggle-scanlines');
+        const toggleShakeInput = document.getElementById('toggle-shake');
 
         // Nav Panels
         const screenMenu = document.getElementById('screen-menu');
@@ -673,33 +678,110 @@
         const screenGameover = document.getElementById('screen-gameover');
         const gameoverTitle = document.getElementById('gameover-title');
         const gameoverSubtitle = document.getElementById('gameover-subtitle');
+        const screenLookup = {
+            'screen-menu': screenMenu,
+            'screen-ship': screenShip,
+            'screen-howto': screenHowto,
+            'screen-highscores': screenHighscores,
+            'screen-settings': screenSettings,
+            'screen-gameover': screenGameover
+        };
 
         const CANVAS_WIDTH = 800;
         const CANVAS_HEIGHT = 600;
-
-        canvas.width = CANVAS_WIDTH;
-        canvas.height = CANVAS_HEIGHT;
-
-        // Custom config settings state
-        let configScreenShake = true;
-        let configScanlines = true;
-
-        // Scores array
-        let leaderBoard = [
+        const STORAGE_KEYS = {
+            settings: 'neon-break-settings',
+            leaderboard: 'neon-break-leaderboard',
+            selectedShip: 'neon-break-ship'
+        };
+        const DEFAULT_SETTINGS = Object.freeze({
+            music: true,
+            muted: false,
+            scanlines: true,
+            screenShake: true
+        });
+        const DEFAULT_LEADERBOARD = [
             { name: "MEGA_DAVE", score: 15500 },
             { name: "VAPOR_X", score: 12000 },
             { name: "RETR0_99", score: 9800 },
             { name: "SYNTH_RACER", score: 7500 },
             { name: "CYBER_PUNK", score: 5000 }
         ];
+        const MUTE_ICON_PATHS = {
+            muted: `<path fill-rule="evenodd" d="M13.414 10l2.293-2.293a1 1 0 10-1.414-1.414L12 8.586L9.707 6.293a1 1 0 00-1.414 1.414L10.586 10l-2.293 2.293a1 1 0 101.414 1.414L12 11.414l2.293 2.293a1 1 0 001.414-1.414L13.414 10z" clip-rule="evenodd"/><path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.63-3.63a1 1 0 011.167-.294z" clip-rule="evenodd" />`,
+            unmuted: `<path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.63-3.63a1 1 0 011.167-.294zM11.664 6.3a1 1 0 111.672-1.1 10.004 10.004 0 010 9.6a1 1 0 11-1.672-1.1 8.004 8.004 0 000-7.4z" clip-rule="evenodd" />`
+        };
+
+        canvas.width = CANVAS_WIDTH;
+        canvas.height = CANVAS_HEIGHT;
+
+        function readStorage(key, fallbackValue) {
+            try {
+                const rawValue = window.localStorage.getItem(key);
+                return rawValue ? JSON.parse(rawValue) : fallbackValue;
+            } catch (error) {
+                return fallbackValue;
+            }
+        }
+
+        function writeStorage(key, value) {
+            try {
+                window.localStorage.setItem(key, JSON.stringify(value));
+            } catch (error) {}
+        }
+
+        function sanitizeShipType(shipType) {
+            return Object.prototype.hasOwnProperty.call(SHIPS_PROFILES, shipType) ? shipType : 'Spectre';
+        }
+
+        function sanitizeLeaderBoard(entries) {
+            if (!Array.isArray(entries)) return [...DEFAULT_LEADERBOARD];
+
+            return entries
+                .filter(entry => entry && typeof entry.name === 'string' && Number.isFinite(entry.score))
+                .map(entry => ({
+                    name: entry.name.toUpperCase().slice(0, 16),
+                    score: Math.max(0, Math.floor(entry.score)),
+                    isNew: Boolean(entry.isNew)
+                }))
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 10);
+        }
+
+        function syncShipCardStats() {
+            const shipCardStats = {
+                Spectre: ['3 / 5', '3 / 5'],
+                NeonFury: ['5 / 5', '2 / 5'],
+                Titan: ['2 / 5', '5 / 5']
+            };
+
+            Object.entries(shipCardStats).forEach(([shipType, values]) => {
+                const statCells = document.querySelectorAll(`#ship-${shipType} .flex.justify-between span:last-child`);
+                values.forEach((value, index) => {
+                    if (statCells[index]) {
+                        statCells[index].textContent = value;
+                    }
+                });
+            });
+        }
 
         // Aircraft Profiles
-        let selectedShipType = 'Spectre';
         const SHIPS_PROFILES = {
             Spectre: { name: "Spectre", baseW: 120, speedMult: 1.0 },
             NeonFury: { name: "NeonFury", baseW: 100, speedMult: 1.3 },
             Titan: { name: "Titan", baseW: 150, speedMult: 0.8 }
         };
+
+        const storedSettings = { ...DEFAULT_SETTINGS, ...readStorage(STORAGE_KEYS.settings, DEFAULT_SETTINGS) };
+
+        // Custom config settings state
+        let configScreenShake = storedSettings.screenShake;
+        let configScanlines = storedSettings.scanlines;
+
+        // Scores array
+        let leaderBoard = sanitizeLeaderBoard(readStorage(STORAGE_KEYS.leaderboard, DEFAULT_LEADERBOARD));
+
+        let selectedShipType = sanitizeShipType(readStorage(STORAGE_KEYS.selectedShip, 'Spectre'));
 
         // Game Core States
         let gameState = 'MENU';
@@ -718,7 +800,9 @@
 
         let gridYOffset = 0;
         let mouseX = CANVAS_WIDTH / 2;
+        let lastInputMode = 'pointer';
         let sunLineOffset = 0; // Sun slicing animations scroll offset
+        const managedTimeouts = new Set();
 
         const COLOR_THEMES = {
             cyan: '#00ffff',
@@ -747,28 +831,275 @@
             { type: 'FIRE', color: COLOR_THEMES.red, label: 'F', desc: 'Unstoppable Fireball' },
             { type: 'SLOW', color: COLOR_THEMES.green, label: 'D', desc: 'Damped Projectiles' }
         ];
+        const LEVEL_PATTERNS = [
+            {
+                name: 'Warmup Grid',
+                rows: [
+                    '..111111..',
+                    '.11222211.',
+                    '1122332211',
+                    '1122332211',
+                    '.11222211.',
+                    '..111111..'
+                ]
+            },
+            {
+                name: 'Twin Gates',
+                rows: [
+                    '11..1221..',
+                    '1122122211',
+                    '22XX11XX22',
+                    '1122122211',
+                    '11..1221..',
+                    '..111111..'
+                ]
+            },
+            {
+                name: 'Diamond Core',
+                rows: [
+                    '....11....',
+                    '...1221...',
+                    '..123321..',
+                    '.123XX321.',
+                    '..123321..',
+                    '...1221...',
+                    '....11....'
+                ]
+            },
+            {
+                name: 'Pulse Tunnel',
+                rows: [
+                    '1111..1111',
+                    '2221..1222',
+                    '3331..1333',
+                    'XXX1..1XXX',
+                    '3331..1333',
+                    '2221..1222',
+                    '1111..1111'
+                ]
+            },
+            {
+                name: 'Wingspan',
+                rows: [
+                    '1........1',
+                    '11......11',
+                    '122....221',
+                    '1232..2321',
+                    '1233223321',
+                    '12XX22XX21',
+                    '1.11..11.1'
+                ]
+            },
+            {
+                name: 'Fortress',
+                rows: [
+                    '2222222222',
+                    '2XX1111XX2',
+                    '2X122221X2',
+                    '2X123321X2',
+                    '2X122221X2',
+                    '2XX1111XX2',
+                    '2222222222'
+                ]
+            },
+            {
+                name: 'Serpent',
+                rows: [
+                    '1112223331',
+                    '1........1',
+                    '1333222211',
+                    '1........1',
+                    '1122233331',
+                    '1........1',
+                    '1333222211'
+                ]
+            },
+            {
+                name: 'Crossfire',
+                rows: [
+                    '....22....',
+                    '....22....',
+                    '1111221111',
+                    '22XX33XX22',
+                    '1111221111',
+                    '....22....',
+                    '....22....'
+                ]
+            },
+            {
+                name: 'Vault',
+                rows: [
+                    '3333333333',
+                    '3........3',
+                    '3.XX22XX.3',
+                    '3.211112.3',
+                    '3.211112.3',
+                    '3.XX22XX.3',
+                    '3........3',
+                    '3333333333'
+                ]
+            },
+            {
+                name: 'Meteor Rain',
+                rows: [
+                    '1..2..3..1',
+                    '.1..2..3..',
+                    '..1..2..3.',
+                    '3..1..2..3',
+                    '.3..1..2..',
+                    '..3..1..2.',
+                    '2..3..1..2'
+                ]
+            },
+            {
+                name: 'Core Reactor',
+                rows: [
+                    '..222222..',
+                    '.22333322.',
+                    '223XXXX322',
+                    '23X1111X32',
+                    '23X1111X32',
+                    '223XXXX322',
+                    '.22333322.',
+                    '..222222..'
+                ]
+            },
+            {
+                name: 'Final Loop',
+                rows: [
+                    '3333333333',
+                    '3XX2222XX3',
+                    '3211111123',
+                    '32X3XX3X23',
+                    '32X3113X23',
+                    '3211111123',
+                    '3XX2222XX3',
+                    '3333333333'
+                ]
+            }
+        ];
 
         let activePowerupTimer = 0;
         let activePowerupMax = 1;
         let activePowerupType = null;
+        const POWERUP_DURATIONS = {
+            WIDE: 10000,
+            LASER_DEFAULT_MS: 7680,
+            LASER_NEON_FURY_MS: 10240,
+            FIRE: 7000,
+            SLOW: 6000
+        };
+        const KEYBOARD_PADDLE_SPEED = 10;
+
+        function scheduleManagedTimeout(callback, delay) {
+            const timeoutId = window.setTimeout(() => {
+                managedTimeouts.delete(timeoutId);
+                callback();
+            }, delay);
+            managedTimeouts.add(timeoutId);
+            return timeoutId;
+        }
+
+        function clearManagedTimeouts() {
+            managedTimeouts.forEach(timeoutId => window.clearTimeout(timeoutId));
+            managedTimeouts.clear();
+        }
+
+        function persistSettings() {
+            writeStorage(STORAGE_KEYS.settings, {
+                music: sfx.musicEnabled,
+                muted: sfx.muted,
+                scanlines: configScanlines,
+                screenShake: configScreenShake
+            });
+        }
+
+        function persistLeaderBoard() {
+            writeStorage(
+                STORAGE_KEYS.leaderboard,
+                leaderBoard.map(({ name, score }) => ({ name, score }))
+            );
+        }
+
+        function syncMuteButton() {
+            muteIcon.innerHTML = sfx.muted ? MUTE_ICON_PATHS.muted : MUTE_ICON_PATHS.unmuted;
+            muteIcon.classList.toggle('text-slate-500', sfx.muted);
+            muteIcon.classList.toggle('text-pink-400', !sfx.muted);
+        }
+
+        function syncSettingsControls() {
+            toggleMusic.checked = sfx.musicEnabled;
+            toggleScanlinesInput.checked = configScanlines;
+            toggleShakeInput.checked = configScreenShake;
+        }
+
+        function applyVisualSettings() {
+            gameContainer.classList.toggle('scanlines', configScanlines);
+            syncSettingsControls();
+            syncMuteButton();
+        }
+
+        function clearNewScoreFlags() {
+            leaderBoard = leaderBoard.map(({ isNew, ...entry }) => entry);
+        }
+
+        function addLeaderBoardEntry(name, nextScore) {
+            clearNewScoreFlags();
+            leaderBoard = sanitizeLeaderBoard([
+                ...leaderBoard,
+                { name, score: nextScore, isNew: true }
+            ]);
+            persistLeaderBoard();
+        }
+
+        function setMuted(nextMuted) {
+            sfx.muted = nextMuted;
+            if (sfx.muted) {
+                sfx.stopBGM();
+            } else if (gameState === 'PLAYING') {
+                sfx.startBGM();
+            }
+
+            syncMuteButton();
+            persistSettings();
+        }
+
+        function clearPowerupStatus() {
+            activePowerupTimer = 0;
+            activePowerupMax = 1;
+            activePowerupType = null;
+            powerupStatus.classList.add('hidden');
+            powerupProgressBar.style.width = '0%';
+        }
+
+        function showTimedPowerupStatus(powerupConfig, durationFrames = 480) {
+            activePowerupType = powerupConfig.type;
+            activePowerupTimer = durationFrames;
+            activePowerupMax = durationFrames;
+            powerupBannerText.textContent = `${powerupConfig.desc}!`;
+            powerupBannerText.style.color = powerupConfig.color;
+            powerupProgressBar.style.width = '100%';
+            powerupStatus.classList.remove('hidden');
+        }
+
+        function setGameState(nextState) {
+            gameState = nextState;
+            pauseOverlay.classList.toggle('hidden', nextState !== 'PAUSED');
+
+            if (nextState === 'PLAYING') {
+                sfx.startBGM();
+            } else if (nextState === 'PAUSED' || nextState === 'GAMEOVER' || nextState === 'COMPLETED' || nextState === 'MENU') {
+                sfx.stopBGM();
+            }
+        }
+
+        sfx.musicEnabled = storedSettings.music;
+        sfx.muted = storedSettings.muted;
+        applyVisualSettings();
 
         // Sound Configuration mute toggle
         muteBtn.addEventListener('click', () => {
-            sfx.muted = !sfx.muted;
-            if (sfx.muted) {
-                muteIcon.innerHTML = `<path fill-rule="evenodd" d="M13.414 10l2.293-2.293a1 1 0 10-1.414-1.414L12 8.586L9.707 6.293a1 1 0 00-1.414 1.414L10.586 10l-2.293 2.293a1 1 0 101.414 1.414L12 11.414l2.293 2.293a1 1 0 001.414-1.414L13.414 10z" clip-rule="evenodd"/><path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.63-3.63a1 1 0 011.167-.294z" clip-rule="evenodd" />`;
-                muteIcon.classList.add('text-slate-500');
-                muteIcon.classList.remove('text-pink-400');
-                sfx.stopBGM();
-            } else {
-                muteIcon.innerHTML = `<path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.707.707L4.586 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.586l3.63-3.63a1 1 0 011.167-.294zM11.664 6.3a1 1 0 111.672-1.1 10.004 10.004 0 010 9.6a1 1 0 11-1.672-1.1 8.004 8.004 0 000-7.4z" clip-rule="evenodd" />`;
-                muteIcon.classList.remove('text-slate-500');
-                muteIcon.classList.add('text-pink-400');
-                sfx.init();
-                if (gameState === 'PLAYING') {
-                    sfx.startBGM();
-                }
-            }
+            setMuted(!sfx.muted);
         });
 
         // Object Class Definitions
@@ -837,8 +1168,17 @@
             }
 
             update() {
-                const targetX = mouseX - this.w / 2;
-                this.x += (targetX - this.x) * (0.24 * this.speedMult);
+                const keyboardDirection =
+                    (keys.ArrowRight || keys.d || keys.D ? 1 : 0) -
+                    (keys.ArrowLeft || keys.a || keys.A ? 1 : 0);
+
+                if (lastInputMode === 'keyboard') {
+                    this.x += keyboardDirection * KEYBOARD_PADDLE_SPEED * this.speedMult;
+                    mouseX = this.x + this.w / 2;
+                } else {
+                    const targetX = mouseX - this.w / 2;
+                    this.x += (targetX - this.x) * (0.24 * this.speedMult);
+                }
 
                 if (this.x < 0) this.x = 0;
                 if (this.x + this.w > CANVAS_WIDTH) this.x = CANVAS_WIDTH - this.w;
@@ -1144,56 +1484,76 @@
             ctx.restore();
         }
 
+        function resolveBrickConfigIndex(symbol, difficultyTier, rowIndex, colIndex) {
+            if (symbol === '.' || symbol === ' ') return null;
+            if (symbol === 'X') return 3;
+
+            const baseIndexMap = {
+                '1': 0,
+                '2': 1,
+                '3': 2
+            };
+            const baseIndex = baseIndexMap[symbol] ?? 0;
+            const upgradeBias = (rowIndex + colIndex + difficultyTier) % 3 === 0 ? 1 : 0;
+            const upgradedIndex = Math.min(baseIndex + Math.max(0, difficultyTier - 1) + upgradeBias, 2);
+
+            return difficultyTier === 0 ? baseIndex : upgradedIndex;
+        }
+
         function buildLevel(lvl) {
             bricks = [];
-            const rows = 4 + Math.min(lvl, 4);
+
+            const patternIndex = (lvl - 1) % LEVEL_PATTERNS.length;
+            const difficultyTier = Math.floor((lvl - 1) / LEVEL_PATTERNS.length);
+            const pattern = LEVEL_PATTERNS[patternIndex];
+            const layoutRows = pattern.rows;
             const cols = 10;
             const brickWidth = 72;
             const brickHeight = 24;
             const startX = (CANVAS_WIDTH - (cols * brickWidth)) / 2;
-            const startY = 60;
+            const startY = Math.max(52, 70 - Math.max(0, layoutRows.length - 6) * 5);
 
-            for (let r = 0; r < rows; r++) {
+            for (let r = 0; r < layoutRows.length; r++) {
+                const rowPattern = layoutRows[r];
+
                 for (let c = 0; c < cols; c++) {
-                    let typeIdx = 0;
-                    const randomVal = Math.random();
+                    const symbol = rowPattern[c] ?? '.';
+                    const typeIdx = resolveBrickConfigIndex(symbol, difficultyTier, r, c);
 
-                    if (r === 0 && lvl > 1) {
-                        typeIdx = 2; // Hard bricks
-                    } else if (r === 1 && lvl > 2) {
-                        typeIdx = 1;
-                    } else {
-                        if (randomVal > 0.85) {
-                            typeIdx = 2;
-                        } else if (randomVal > 0.65) {
-                            typeIdx = 1;
-                        } else if (randomVal > 0.60 && lvl > 2) {
-                            typeIdx = 3; // Unbreakable Obstacles
-                        }
-                    }
+                    if (typeIdx === null) continue;
 
                     const brickX = startX + (c * brickWidth);
                     const brickY = startY + (r * brickHeight);
                     bricks.push(new Brick(c, r, brickX, brickY, brickWidth, brickHeight, typeIdx));
                 }
             }
+
             updateRemainingBricksCounter();
         }
 
         function updateRemainingBricksCounter() {
             const count = bricks.filter(b => b.durability > 0 && b.config.hits !== 99).length;
-            bricksRemainingDisplay.innerText = count;
+            bricksRemainingDisplay.textContent = count;
         }
 
         function updateLivesDOM() {
-            livesContainer.innerHTML = '';
+            const fragment = document.createDocumentFragment();
+
             for (let i = 0; i < lives; i++) {
-                livesContainer.innerHTML += `
-                    <svg class="h-6 w-6 text-pink-500 fill-current drop-shadow-[0_0_6px_rgba(236,72,153,0.7)] animate-pulse" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z" clip-rule="evenodd" />
-                    </svg>
-                `;
+                const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                icon.setAttribute('class', 'h-6 w-6 text-pink-500 fill-current drop-shadow-[0_0_6px_rgba(236,72,153,0.7)] animate-pulse');
+                icon.setAttribute('viewBox', '0 0 20 20');
+
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('fill-rule', 'evenodd');
+                path.setAttribute('clip-rule', 'evenodd');
+                path.setAttribute('d', 'M3.172 5.172a4 4 0 015.656 0L10 6.343l1.172-1.171a4 4 0 115.656 5.656L10 17.657l-6.828-6.829a4 4 0 010-5.656z');
+
+                icon.appendChild(path);
+                fragment.appendChild(icon);
             }
+
+            livesContainer.replaceChildren(fragment);
         }
 
         function spawnExplosion(x, y, color) {
@@ -1356,7 +1716,7 @@
                         }
 
                         score += b.config.score;
-                        scoreDisplay.innerText = String(score).padStart(5, '0');
+                        scoreDisplay.textContent = String(score).padStart(5, '0');
                         sfx.playHit(b.durability);
 
                         // Floating Points Pop
@@ -1404,32 +1764,26 @@
         function handlePowerUpCollection(p) {
             if (!paddle) return;
             sfx.playPowerup();
-            
-            // Activate screen progress HUD display
-            activePowerupType = p.config.type;
-            activePowerupTimer = 480; // Default active time frames
-            activePowerupMax = 480;
-            
-            powerupBannerText.innerText = `${p.config.desc}!`;
-            powerupBannerText.style.color = p.config.color;
-            powerupStatus.classList.remove('hidden');
 
             switch (p.config.type) {
                 case 'WIDE':
+                    showTimedPowerupStatus(p.config);
                     paddle.w = selectedShipType === 'Titan' ? 220 : 190;
-                    setTimeout(() => {
+                    scheduleManagedTimeout(() => {
                         if (paddle) paddle.w = SHIPS_PROFILES[selectedShipType].baseW;
-                    }, 10000);
+                    }, POWERUP_DURATIONS.WIDE);
                     break;
                 case 'LASER':
                     paddle.hasLasers = true;
                     // NeonFury gets 10s lasers, others get 7.5s
-                    const laserDuration = selectedShipType === 'NeonFury' ? 640 : 480;
-                    activePowerupTimer = laserDuration;
-                    activePowerupMax = laserDuration;
-                    setTimeout(() => {
+                    const laserDurationFrames = selectedShipType === 'NeonFury' ? 640 : 480;
+                    const laserDurationMs = selectedShipType === 'NeonFury'
+                        ? POWERUP_DURATIONS.LASER_NEON_FURY_MS
+                        : POWERUP_DURATIONS.LASER_DEFAULT_MS;
+                    showTimedPowerupStatus(p.config, laserDurationFrames);
+                    scheduleManagedTimeout(() => {
                         if (paddle) paddle.hasLasers = false;
-                    }, laserDuration * 16);
+                    }, laserDurationMs);
                     break;
                 case 'MULTI':
                     const activeBallsCount = balls.length;
@@ -1442,28 +1796,30 @@
                             balls.push(twin);
                         }
                     }
-                    powerupStatus.classList.add('hidden'); // Immediate effect, no timer bar
+                    clearPowerupStatus();
                     break;
                 case 'SHIELD':
                     shieldActive = true;
-                    powerupStatus.classList.add('hidden'); // Immediate effect
+                    clearPowerupStatus();
                     break;
                 case 'FIRE':
+                    showTimedPowerupStatus(p.config);
                     balls.forEach(b => {
                         b.isFireball = true;
-                        setTimeout(() => {
+                        scheduleManagedTimeout(() => {
                             b.isFireball = false;
-                        }, 7000);
+                        }, POWERUP_DURATIONS.FIRE);
                     });
                     break;
                 case 'SLOW':
+                    showTimedPowerupStatus(p.config);
                     balls.forEach(b => {
                         b.dx *= 0.6;
                         b.dy *= 0.6;
-                        setTimeout(() => {
+                        scheduleManagedTimeout(() => {
                             b.dx *= 1.66;
                             b.dy *= 1.66;
-                        }, 6000);
+                        }, POWERUP_DURATIONS.SLOW);
                     });
                     break;
             }
@@ -1473,22 +1829,23 @@
             const activeBreakables = bricks.filter(b => b.durability > 0 && b.config.hits !== 99);
             
             if (activeBreakables.length === 0 && bricks.length > 0) {
-                gameState = 'COMPLETED';
+                setGameState('COMPLETED');
                 sfx.playLevelComplete();
                 
                 level++;
-                levelDisplay.innerText = level;
+                levelDisplay.textContent = level;
                 
                 floatingTexts.push(new FloatingText(CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2, "WARPING SYSTEM...", COLOR_THEMES.cyan));
                 
-                setTimeout(() => {
+                scheduleManagedTimeout(() => {
                     resetStage();
-                    gameState = 'PLAYING';
+                    setGameState('PLAYING');
                 }, 1500);
             }
         }
 
         function resetStage() {
+            clearManagedTimeouts();
             paddle = new Paddle();
             balls = [new Ball()];
             lasers = [];
@@ -1496,24 +1853,21 @@
             particles = [];
             floatingTexts = [];
             shieldActive = false;
-            activePowerupTimer = 0;
-            powerupStatus.classList.add('hidden');
+            clearPowerupStatus();
             buildLevel(level);
             updateLivesDOM();
         }
 
         function changeScreen(screenId) {
             sfx.playScreenSelect();
-            
-            // Hide all overlays
-            screenMenu.classList.add('hidden');
-            screenShip.classList.add('hidden');
-            screenHowto.classList.add('hidden');
-            screenHighscores.classList.add('hidden');
-            screenSettings.classList.add('hidden');
-            screenGameover.classList.add('hidden');
 
-            document.getElementById(screenId).classList.remove('hidden');
+            Object.entries(screenLookup).forEach(([id, element]) => {
+                element.classList.toggle('hidden', id !== screenId);
+            });
+
+            if (screenId === 'screen-menu') {
+                setGameState('MENU');
+            }
 
             if (screenId === 'screen-highscores') {
                 populateHighscoresTable();
@@ -1521,26 +1875,36 @@
         }
 
         function populateHighscoresTable() {
-            const listContainer = document.getElementById('highscores-list');
-            listContainer.innerHTML = '';
-            
-            leaderBoard.sort((a, b) => b.score - a.score);
-
+            const fragment = document.createDocumentFragment();
             leaderBoard.forEach((entry, index) => {
-                const isCurrent = entry.isNew ? 'text-pink-500 font-bold' : '';
-                listContainer.innerHTML += `
-                    <tr class="border-b border-purple-900/40 ${isCurrent}">
-                        <td class="py-2">0${index + 1}</td>
-                        <td class="py-2">${entry.name}</td>
-                        <td class="py-2 text-right font-mono">${entry.score}</td>
-                    </tr>
-                `;
+                const row = document.createElement('tr');
+                row.className = `border-b border-purple-900/40${entry.isNew ? ' text-pink-500 font-bold' : ''}`;
+
+                const rankCell = document.createElement('td');
+                rankCell.className = 'py-2';
+                rankCell.textContent = String(index + 1).padStart(2, '0');
+
+                const nameCell = document.createElement('td');
+                nameCell.className = 'py-2';
+                nameCell.textContent = entry.name;
+
+                const scoreCell = document.createElement('td');
+                scoreCell.className = 'py-2 text-right font-mono';
+                scoreCell.textContent = entry.score;
+
+                row.append(rankCell, nameCell, scoreCell);
+                fragment.appendChild(row);
             });
+
+            highscoresList.replaceChildren(fragment);
         }
 
-        function selectShip(shipType) {
-            selectedShipType = shipType;
-            sfx.playSelectHover();
+        function selectShip(shipType, shouldPlaySound = true) {
+            selectedShipType = sanitizeShipType(shipType);
+            if (shouldPlaySound) {
+                sfx.playSelectHover();
+            }
+            writeStorage(STORAGE_KEYS.selectedShip, selectedShipType);
             
             document.querySelectorAll('.ship-card').forEach(card => {
                 card.classList.remove('bg-pink-500/20', 'border-pink-500', 'bg-cyan-500/20', 'border-cyan-500', 'bg-purple-500/20', 'border-purple-500');
@@ -1559,58 +1923,62 @@
         }
 
         function launchWithSelectedShip() {
+            clearNewScoreFlags();
             score = 0;
             level = 1;
             lives = 3;
-            scoreDisplay.innerText = "00000";
-            levelDisplay.innerText = level;
+            scoreDisplay.textContent = "00000";
+            levelDisplay.textContent = level;
             
             resetStage();
-            gameState = 'PLAYING';
-            
+            setGameState('PLAYING');
             screenShip.classList.add('hidden');
-            sfx.startBGM();
         }
 
         function toggleMusicEngine() {
-            const chk = document.getElementById('toggle-music');
-            sfx.musicEnabled = chk.checked;
+            sfx.musicEnabled = toggleMusic.checked;
             if (!sfx.musicEnabled) {
                 sfx.stopBGM();
             } else if (gameState === 'PLAYING') {
                 sfx.startBGM();
             }
+
+            persistSettings();
         }
 
         function toggleScanlines() {
-            const chk = document.getElementById('toggle-scanlines');
-            configScanlines = chk.checked;
-            const container = document.getElementById('game-container');
-            if (configScanlines) {
-                container.classList.add('scanlines');
-            } else {
-                container.classList.remove('scanlines');
-            }
+            configScanlines = toggleScanlinesInput.checked;
+            applyVisualSettings();
+            persistSettings();
         }
 
         function toggleScreenShake() {
-            const chk = document.getElementById('toggle-shake');
-            configScreenShake = chk.checked;
+            configScreenShake = toggleShakeInput.checked;
+            persistSettings();
         }
 
         // Keys / Escape Pause handling
         const keys = {};
         window.addEventListener('keydown', (e) => {
             keys[e.key] = true;
+
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key.toLowerCase() === 'a' || e.key.toLowerCase() === 'd') {
+                lastInputMode = 'keyboard';
+                e.preventDefault();
+            }
+
+            if (e.code === 'Space') {
+                e.preventDefault();
+                if (gameState === 'PLAYING' && paddle) {
+                    paddle.shoot();
+                }
+            }
+
             if (e.key === 'Escape' || e.key === 'Esc') {
                 if (gameState === 'PLAYING') {
-                    gameState = 'PAUSED';
-                    sfx.stopBGM();
-                    pauseOverlay.classList.remove('hidden');
+                    setGameState('PAUSED');
                 } else if (gameState === 'PAUSED') {
-                    gameState = 'PLAYING';
-                    sfx.startBGM();
-                    pauseOverlay.classList.add('hidden');
+                    setGameState('PLAYING');
                 }
             }
         });
@@ -1629,10 +1997,12 @@
         }
 
         window.addEventListener('mousemove', (e) => {
+            lastInputMode = 'pointer';
             mouseX = getCanvasPointerX(e);
         });
 
         window.addEventListener('touchmove', (e) => {
+            lastInputMode = 'pointer';
             mouseX = getCanvasPointerX(e);
             e.preventDefault();
         }, { passive: false });
@@ -1645,12 +2015,14 @@
 
         window.addEventListener('touchstart', (e) => {
             if (gameState === 'PLAYING' && paddle) {
+                lastInputMode = 'pointer';
                 mouseX = getCanvasPointerX(e);
                 paddle.shoot();
             }
         });
 
-        selectShip('Spectre');
+        syncShipCardStats();
+        selectShip(selectedShipType, false);
 
         // --- Core Main Update Loop ---
         function update() {
@@ -1667,8 +2039,7 @@
                 const percent = (activePowerupTimer / activePowerupMax) * 100;
                 powerupProgressBar.style.width = `${percent}%`;
                 if (activePowerupTimer <= 0) {
-                    powerupStatus.classList.add('hidden');
-                    activePowerupType = null;
+                    clearPowerupStatus();
                 }
             }
 
@@ -1687,21 +2058,19 @@
                 sfx.playLifeLost();
 
                 if (lives <= 0) {
-                    gameState = 'GAMEOVER';
-                    sfx.stopBGM();
+                    setGameState('GAMEOVER');
                     
                     const pilotName = `PILOT_${Math.floor(100 + Math.random() * 899)}`;
-                    leaderBoard.push({ name: pilotName, score: score, isNew: true });
+                    addLeaderBoardEntry(pilotName, score);
                     
-                    gameoverTitle.innerText = "GRID COLLAPSE";
-                    gameoverSubtitle.innerText = `Final Score: ${score} - Level Reached: ${level}`;
+                    gameoverTitle.textContent = "GRID COLLAPSE";
+                    gameoverSubtitle.textContent = `Final Score: ${score} - Level Reached: ${level}`;
                     
                     changeScreen('screen-gameover');
                 } else {
                     balls.push(new Ball());
                     shieldActive = false;
-                    activePowerupTimer = 0;
-                    powerupStatus.classList.add('hidden');
+                    clearPowerupStatus();
                 }
             }
 
@@ -1727,7 +2096,7 @@
                         if (b.config.hits !== 99) {
                             b.durability--;
                             score += b.config.score;
-                            scoreDisplay.innerText = String(score).padStart(5, '0');
+                            scoreDisplay.textContent = String(score).padStart(5, '0');
                             sfx.playHit(b.durability);
 
                             floatingTexts.push(new FloatingText(b.x + b.w / 2, b.y, `+${b.config.score}`, b.config.color));
